@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 
 	"github.com/Happy2018new/pre-transfer-server/minecraft"
@@ -9,20 +10,26 @@ import (
 	"github.com/Happy2018new/pre-transfer-server/minecraft/protocol/packet"
 )
 
-// RemoteServerAddr ..
-type RemoteServerAddr struct {
+// Config ..
+type Config struct {
+	Local  ServerAddress `json:"local"`
+	Remote ServerAddress `json:"remote"`
+}
+
+// ServerAddress ..
+type ServerAddress struct {
 	Address string `json:"address"`
 	Port    uint16 `json:"port"`
 }
 
 func main() {
-	var serverAddress RemoteServerAddr
+	var cfg Config
 
 	fileBytes, err := os.ReadFile("config.json")
 	if err != nil {
 		panic(err)
 	}
-	err = json.Unmarshal(fileBytes, &serverAddress)
+	err = json.Unmarshal(fileBytes, &cfg)
 	if err != nil {
 		panic(err)
 	}
@@ -30,7 +37,7 @@ func main() {
 	config := minecraft.ListenConfig{
 		AuthenticationDisabled: true,
 	}
-	listener, err := config.Listen("raknet", "127.0.0.1:2025")
+	listener, err := config.Listen("raknet", fmt.Sprintf("%s:%d", cfg.Local.Address, cfg.Local.Port))
 	if err != nil {
 		panic(err)
 	}
@@ -90,8 +97,8 @@ func main() {
 		}
 
 		_ = conn.WritePacket(&packet.Transfer{
-			Address: serverAddress.Address,
-			Port:    serverAddress.Port,
+			Address: cfg.Remote.Address,
+			Port:    cfg.Remote.Port,
 		})
 		_ = conn.Close()
 	}
