@@ -1014,11 +1014,14 @@ func (conn *Conn) handleResourcePackClientResponse(pk *packet.ResourcePackClient
 	// PhoenixBuilder specific changes.
 	// Author: Happy2018new
 	if conn.packQueue == nil && len(conn.resourcePacks) > 0 {
-		if !checkResourcePackDownloaded(conn.identityData.Identity) {
-			packsToDownload := make([]string, 0)
-			for _, value := range conn.resourcePacks {
-				packsToDownload = append(packsToDownload, value.UUID()+"_"+value.Version())
+		packsToDownload := make([]string, 0)
+		for _, value := range conn.resourcePacks {
+			packIdentity := value.UUID() + "_" + value.Version()
+			if !GetPackDownloadStates(conn.identityData.Identity, packIdentity) {
+				packsToDownload = append(packsToDownload, packIdentity)
 			}
+		}
+		if len(packsToDownload) > 0 {
 			pk = &packet.ResourcePackClientResponse{
 				Response:        packet.PackResponseSendPacks,
 				PacksToDownload: packsToDownload,
@@ -1265,12 +1268,17 @@ func (conn *Conn) handleResourcePackChunkRequest(pk *packet.ResourcePackChunkReq
 				time.Sleep(time.Second * 5)
 			}
 
+			SetPackDownloadStates(
+				conn.identityData.Identity,
+				current.UUID()+"_"+current.Version(),
+				true,
+			)
 			if !conn.packQueue.AllDownloaded() {
 				_ = conn.nextResourcePackDownload()
 				return
 			}
 
-			markResourcePackDownloaded(conn.identityData.Identity)
+			time.Sleep(time.Second * 3) // Just make sure the client unzip all the files
 			conn.expect(packet.IDResourcePackClientResponse)
 			conn.handleResourcePackClientResponse(&packet.ResourcePackClientResponse{
 				Response:        packet.PackResponseAllPacksDownloaded,

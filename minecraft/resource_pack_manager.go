@@ -7,12 +7,12 @@ import (
 	"sync"
 )
 
-var mu *sync.RWMutex
-var record map[string]bool
+var mutex *sync.RWMutex
+var record map[string]map[string]bool
 
 func init() {
-	mu = new(sync.RWMutex)
-	record = make(map[string]bool)
+	mutex = new(sync.RWMutex)
+	record = make(map[string]map[string]bool)
 
 	fileBytes, err := os.ReadFile("record.json")
 	if err != nil {
@@ -25,29 +25,38 @@ func init() {
 	}
 }
 
-// markResourcePackDownloaded ..
-func markResourcePackDownloaded(playerIdentity string) error {
-	mu.Lock()
-	defer mu.Unlock()
+// GetPackDownloadStates ..
+func GetPackDownloadStates(playerIdentity string, packIdentity string) bool {
+	mutex.RLock()
+	defer mutex.RUnlock()
+	mapping, ok := record[playerIdentity]
+	if !ok {
+		return false
+	}
+	return mapping[packIdentity]
+}
 
-	record[playerIdentity] = true
+// SetPackDownloadStates ..
+func SetPackDownloadStates(playerIdentity string, packIdentity string, states bool) error {
+	mutex.Lock()
+	defer mutex.Unlock()
 
-	fileBytes, err := json.Marshal(record)
+	mapping, ok := record[playerIdentity]
+	if !ok {
+		mapping = make(map[string]bool)
+	}
+	mapping[packIdentity] = states
+	record[playerIdentity] = mapping
+
+	fileBytes, err := json.MarshalIndent(record, "", "\t")
 	if err != nil {
-		return fmt.Errorf("markResourcePackDownloaded: %v", err)
+		return fmt.Errorf("SetPackDownloadStates: %v", err)
 	}
 
 	err = os.WriteFile("record.json", fileBytes, 0600)
 	if err != nil {
-		return fmt.Errorf("markResourcePackDownloaded: %v", err)
+		return fmt.Errorf("SetPackDownloadStates: %v", err)
 	}
 
 	return nil
-}
-
-// checkResourcePackDownloaded ..
-func checkResourcePackDownloaded(playerIdentity string) bool {
-	mu.RLock()
-	defer mu.RUnlock()
-	return record[playerIdentity]
 }
