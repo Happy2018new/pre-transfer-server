@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/Happy2018new/pre-transfer-server/minecraft"
 	"github.com/Happy2018new/pre-transfer-server/minecraft/protocol"
 	"github.com/Happy2018new/pre-transfer-server/minecraft/protocol/packet"
+	"github.com/Happy2018new/pre-transfer-server/minecraft/resource"
 )
 
 // Config ..
@@ -24,6 +27,30 @@ type ServerAddress struct {
 
 func main() {
 	var cfg Config
+	var packs []*resource.Pack
+
+	entries, err := os.ReadDir("packs")
+	if err != nil {
+		panic(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		fileBytes, err := os.ReadFile(filepath.Join("packs", entry.Name()))
+		if err != nil {
+			panic(err)
+		}
+
+		buf := bytes.NewBuffer(fileBytes)
+		pack, err := resource.Read(buf)
+		if err != nil {
+			panic(err)
+		}
+
+		packs = append(packs, pack)
+	}
 
 	fileBytes, err := os.ReadFile("config.json")
 	if err != nil {
@@ -36,6 +63,7 @@ func main() {
 
 	config := minecraft.ListenConfig{
 		AuthenticationDisabled: true,
+		ResourcePacks:          packs,
 	}
 	listener, err := config.Listen("raknet", fmt.Sprintf("%s:%d", cfg.Local.Address, cfg.Local.Port))
 	if err != nil {

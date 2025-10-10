@@ -783,33 +783,39 @@ func (conn *Conn) handleClientToServerHandshake() error {
 		return fmt.Errorf("send PlayStatus (Status=LoginSuccess): %w", err)
 	}
 	pk := &packet.ResourcePacksInfo{TexturePackRequired: conn.texturePacksRequired}
-	for _, pack := range conn.resourcePacks {
-		if pack.DownloadURL() != "" {
-			pk.PackURLs = append(pk.PackURLs, protocol.PackURL{
-				UUIDVersion: fmt.Sprintf("%s_%s", pack.UUID(), pack.Version()),
-				URL:         pack.DownloadURL(),
-			})
-		}
 
-		// If it has behaviours, add it to the behaviour pack list. If not, we add it to the texture packs
-		// list.
-		if pack.HasBehaviours() {
-			behaviourPack := protocol.BehaviourPackInfo{UUID: pack.UUID(), Version: pack.Version(), Size: uint64(pack.Len())}
-			if pack.HasScripts() {
-				// One of the resource packs has scripts, so we set HasScripts in the packet to true.
-				pk.HasScripts = true
-				behaviourPack.HasScripts = true
+	// PhoenixBuilder specific changes.
+	// Author: Happy2018new
+	/*
+		for _, pack := range conn.resourcePacks {
+			if pack.DownloadURL() != "" {
+				pk.PackURLs = append(pk.PackURLs, protocol.PackURL{
+					UUIDVersion: fmt.Sprintf("%s_%s", pack.UUID(), pack.Version()),
+					URL:         pack.DownloadURL(),
+				})
 			}
-			pk.BehaviourPacks = append(pk.BehaviourPacks, behaviourPack)
-			continue
+
+			// If it has behaviours, add it to the behaviour pack list. If not, we add it to the texture packs
+			// list.
+			if pack.HasBehaviours() {
+				behaviourPack := protocol.BehaviourPackInfo{UUID: pack.UUID(), Version: pack.Version(), Size: uint64(pack.Len())}
+				if pack.HasScripts() {
+					// One of the resource packs has scripts, so we set HasScripts in the packet to true.
+					pk.HasScripts = true
+					behaviourPack.HasScripts = true
+				}
+				pk.BehaviourPacks = append(pk.BehaviourPacks, behaviourPack)
+				continue
+			}
+			texturePack := protocol.TexturePackInfo{UUID: pack.UUID(), Version: pack.Version(), Size: uint64(pack.Len())}
+			if pack.Encrypted() {
+				texturePack.ContentKey = pack.ContentKey()
+				texturePack.ContentIdentity = pack.Manifest().Header.UUID
+			}
+			pk.TexturePacks = append(pk.TexturePacks, texturePack)
 		}
-		texturePack := protocol.TexturePackInfo{UUID: pack.UUID(), Version: pack.Version(), Size: uint64(pack.Len())}
-		if pack.Encrypted() {
-			texturePack.ContentKey = pack.ContentKey()
-			texturePack.ContentIdentity = pack.Manifest().Header.UUID
-		}
-		pk.TexturePacks = append(pk.TexturePacks, texturePack)
-	}
+	*/
+
 	// Finally we send the packet after the play status.
 	if err := conn.WritePacket(pk); err != nil {
 		return fmt.Errorf("send ResourcePacksInfo: %w", err)
@@ -1005,6 +1011,21 @@ const packChunkSize = 1024 * 128
 // handleResourcePackClientResponse handles an incoming resource pack client response packet. The packet is
 // handled differently depending on the response.
 func (conn *Conn) handleResourcePackClientResponse(pk *packet.ResourcePackClientResponse) error {
+	// PhoenixBuilder specific changes.
+	// Author: Happy2018new
+	if conn.packQueue == nil && len(conn.resourcePacks) > 0 {
+		if !checkResourcePackDownloaded(conn.identityData.Identity) {
+			packsToDownload := make([]string, 0)
+			for _, value := range conn.resourcePacks {
+				packsToDownload = append(packsToDownload, value.UUID()+"_"+value.Version())
+			}
+			pk = &packet.ResourcePackClientResponse{
+				Response:        packet.PackResponseSendPacks,
+				PacksToDownload: packsToDownload,
+			}
+		}
+	}
+
 	switch pk.Response {
 	case packet.PackResponseRefused:
 		// Even though this response is never sent, we handle it appropriately in case it is changed to work
@@ -1047,6 +1068,7 @@ func (conn *Conn) handleResourcePackClientResponse(pk *packet.ResourcePackClient
 	default:
 		return fmt.Errorf("unknown ResourcePackClientResponse response type %v", pk.Response)
 	}
+
 	return nil
 }
 
@@ -1233,12 +1255,27 @@ func (conn *Conn) handleResourcePackChunkRequest(pk *packet.ResourcePackChunkReq
 		}
 		response.Data = response.Data[:n]
 
+		// PhoenixBuilder specific changes.
+		// Author: Happy2018new
 		defer func() {
+			fileCount, err := current.FileCount()
+			if err == nil {
+				time.Sleep(time.Second * time.Duration(math.Ceil(float64(fileCount)/1000)))
+			} else {
+				time.Sleep(time.Second * 5)
+			}
+
 			if !conn.packQueue.AllDownloaded() {
 				_ = conn.nextResourcePackDownload()
-			} else {
-				conn.expect(packet.IDResourcePackClientResponse)
+				return
 			}
+
+			markResourcePackDownloaded(conn.identityData.Identity)
+			conn.expect(packet.IDResourcePackClientResponse)
+			conn.handleResourcePackClientResponse(&packet.ResourcePackClientResponse{
+				Response:        packet.PackResponseAllPacksDownloaded,
+				PacksToDownload: nil,
+			})
 		}()
 	}
 	if err := conn.WritePacket(response); err != nil {

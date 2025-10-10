@@ -248,6 +248,27 @@ func (pack *Pack) String() string {
 	return fmt.Sprintf("%v v%v (%v): %v", pack.Name(), pack.Version(), pack.UUID(), pack.Description())
 }
 
+// PhoenixBuilder specific changes.
+// Author: Happy2018new
+//
+// FileCount returns how many file are exist in current resource pack.
+// Note that folders are also counted as files.
+func (pack *Pack) FileCount() (result int, err error) {
+	fileBytes := make([]byte, pack.Len())
+	_, err = pack.ReadAt(fileBytes, 0)
+	if err != nil {
+		return 0, fmt.Errorf("FileCount: %v", err)
+	}
+
+	buf := bytes.NewReader(fileBytes)
+	r, err := zip.NewReader(buf, int64(buf.Len()))
+	if err != nil {
+		return 0, fmt.Errorf("FileCount: %v", err)
+	}
+
+	return len(r.File), nil
+}
+
 // compile compiles the resource pack found in path, either a zip archive or a directory, and returns a
 // resource pack if successful.
 func compile(path string) (*Pack, error) {
