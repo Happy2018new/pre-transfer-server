@@ -260,11 +260,6 @@ func init() {
 		IDMovementEffect:                 func() Packet { return &MovementEffect{} },
 		IDSetMovementAuthority:           func() Packet { return &SetMovementAuthority{} },
 		IDCameraAimAssistPresets:         func() Packet { return &CameraAimAssistPresets{} },
-
-		// PhoenixBuilder specific changes.
-		// Author: Liliya233
-		// Netease: new packet
-		IDNeteaseJson: func() Packet { return &NeteaseJson{} },
 	}
 	for id, pk := range serverOriginating {
 		RegisterPacket(id, pk)
@@ -352,11 +347,6 @@ func init() {
 		IDSetPlayerInventoryOptions:       func() Packet { return &SetPlayerInventoryOptions{} },
 		IDServerBoundLoadingScreen:        func() Packet { return &ServerBoundLoadingScreen{} },
 		IDServerBoundDiagnostics:          func() Packet { return &ServerBoundDiagnostics{} },
-
-		// PhoenixBuilder specific changes.
-		// Author: Liliya233
-		// Netease: new packet
-		IDNeteaseJson: func() Packet { return &NeteaseJson{} },
 	}
 	for id, pk := range clientOriginating {
 		RegisterPacket(id, pk)
