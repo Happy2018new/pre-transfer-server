@@ -6,7 +6,7 @@ import (
 
 // RemoveVolumeEntity indicates a volume entity to be removed from server to client.
 type RemoveVolumeEntity struct {
-	// EntityRuntimeID ..
+	// EntityRuntimeID ...
 	EntityRuntimeID uint64
 	// Dimension ...
 	Dimension int32

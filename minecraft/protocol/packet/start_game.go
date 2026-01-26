@@ -3,7 +3,6 @@ package packet
 import (
 	"github.com/Happy2018new/pre-transfer-server/minecraft/nbt"
 	"github.com/Happy2018new/pre-transfer-server/minecraft/protocol"
-
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/google/uuid"
 )

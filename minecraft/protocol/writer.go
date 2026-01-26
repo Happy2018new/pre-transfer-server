@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"image/color"
 	"io"
+	"math/big"
 	"reflect"
 	"sort"
 	"unsafe"
 
 	"github.com/Happy2018new/pre-transfer-server/minecraft/nbt"
-
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/google/uuid"
 )
@@ -125,7 +125,7 @@ func (w *Writer) SubChunkPos(x *SubChunkPos) {
 // SoundPos writes an mgl32.Vec3 that serves as a position for a sound.
 func (w *Writer) SoundPos(x *mgl32.Vec3) {
 	b := BlockPos{int32((*x)[0] * 8), int32((*x)[1] * 8), int32((*x)[2] * 8)}
-	w.BlockPos(&b)
+	w.UBlockPos(&b)
 }
 
 // RGB writes a color.RGBA x as 3 float32s to the underlying buffer.
@@ -167,6 +167,7 @@ func (w *Writer) PlayerInventoryAction(x *UseItemTransactionData) {
 	}
 	Slice(w, &x.Actions)
 	w.Varuint32(&x.ActionType)
+	w.Varuint32(&x.TriggerType)
 
 	// PhoenixBuilder specific changes.
 	// Author: Happy2018new
@@ -179,6 +180,7 @@ func (w *Writer) PlayerInventoryAction(x *UseItemTransactionData) {
 	w.Vec3(&x.Position)
 	w.Vec3(&x.ClickedPosition)
 	w.Varuint32(&x.BlockRuntimeID)
+	w.Varuint32(&x.ClientPrediction)
 }
 
 // GameRule writes a GameRule x to the Writer.
@@ -488,6 +490,27 @@ func (w *Writer) CompressedBiomeDefinitions(x *map[string]any) {
 	length := uint32(len(compressed))
 	w.Varuint32(&length)
 	w.Bytes(&compressed)
+}
+
+var varintMaxByteValue = big.NewInt(0x80)
+
+func (w *Writer) Bitset(x *Bitset, size int) {
+	if x.size != size {
+		w.panicf("bitset size mismatch: expected %v, got %v", size, x.size)
+	}
+	u := new(big.Int)
+	u.Set(x.int)
+
+	if len(u.Bits()) == 0 {
+		_ = w.w.WriteByte(0)
+		return
+	}
+
+	for u.Cmp(varintMaxByteValue) >= 0 {
+		_ = w.w.WriteByte(byte(u.Bits()[0]) | 0x80)
+		u.Rsh(u, 7)
+	}
+	_ = w.w.WriteByte(byte(u.Bits()[0]))
 }
 
 // Varint64 writes an int64 as 1-10 bytes to the underlying buffer.

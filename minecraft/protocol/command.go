@@ -1,9 +1,8 @@
 package protocol
 
 import (
-	"math"
-
 	"github.com/google/uuid"
+	"math"
 )
 
 // Command holds the data that a command requires to be shown to a player client-side. The command is shown in

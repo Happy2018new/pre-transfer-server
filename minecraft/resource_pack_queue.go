@@ -40,8 +40,9 @@ func (queue *resourcePackQueue) Request(packs []string) error {
 		for _, pack := range queue.packs {
 			// Mojang made some hack that merges the UUID with the version, so we need to combine that here
 			// too in order to find the proper pack.
-			if pack.UUID()+"_"+pack.Version() == packUUID {
-				queue.packsToDownload[pack.UUID()] = pack
+			id := pack.UUID().String()
+			if id+"_"+pack.Version() == packUUID {
+				queue.packsToDownload[id] = pack
 				found = true
 				break
 			}
@@ -77,7 +78,7 @@ func (queue *resourcePackQueue) NextPack() (pk *packet.ResourcePackDataInfo, ok 
 			packType = packet.ResourcePackTypeSkins
 		}
 		return &packet.ResourcePackDataInfo{
-			UUID:          pack.UUID(),
+			UUID:          pack.UUID().String(),
 			DataChunkSize: packChunkSize,
 			ChunkCount:    uint32(pack.DataChunkCount(packChunkSize)),
 			Size:          uint64(pack.Len()),

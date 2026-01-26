@@ -7,6 +7,18 @@ so we don't show all the changes here.
 */
 package packet
 
+// PhoenixBuilder specific func.
+// Author: Happy2018new
+
+// RegisterPacket registers a function that returns a packet for a specific ID.
+// Packets with this ID coming in from connections will resolve to the packet
+// returned by the function passed.
+//
+// noinspection
+func RegisterPacket(id uint32, pk func() Packet) {
+	packets[id] = pk
+}
+
 // PhoenixBuilder specific changes.
 // Author: Liliya233
 //
@@ -31,7 +43,8 @@ func ListAllPackets() Pool {
 }
 
 func init() {
-	packets = map[uint32]func() Packet{
+	// TODO: Remove packets from this list that are not sent by the server.
+	serverOriginating := map[uint32]func() Packet{
 		IDLogin:                      func() Packet { return &Login{} },
 		IDPlayStatus:                 func() Packet { return &PlayStatus{} },
 		IDServerToClientHandshake:    func() Packet { return &ServerToClientHandshake{} },
@@ -146,6 +159,7 @@ func init() {
 		IDUpdateSoftEnum:              func() Packet { return &UpdateSoftEnum{} },
 		IDNetworkStackLatency:         func() Packet { return &NetworkStackLatency{} },
 		// ---
+		IDScriptCustomEvent:           func() Packet { return &ScriptCustomEvent{} },
 		IDSpawnParticleEffect:         func() Packet { return &SpawnParticleEffect{} },
 		IDAvailableActorIdentifiers:   func() Packet { return &AvailableActorIdentifiers{} },
 		IDNetworkChunkPublisherUpdate: func() Packet { return &NetworkChunkPublisherUpdate{} },
@@ -237,10 +251,114 @@ func init() {
 		IDSetHud:                         func() Packet { return &SetHud{} },
 		IDAwardAchievement:               func() Packet { return &AwardAchievement{} },
 		IDClientBoundCloseForm:           func() Packet { return &ClientBoundCloseForm{} },
+		IDServerBoundLoadingScreen:       func() Packet { return &ServerBoundLoadingScreen{} },
+		IDJigsawStructureData:            func() Packet { return &JigsawStructureData{} },
+		IDCurrentStructureFeature:        func() Packet { return &CurrentStructureFeature{} },
+		IDServerBoundDiagnostics:         func() Packet { return &ServerBoundDiagnostics{} },
+		IDCameraAimAssist:                func() Packet { return &CameraAimAssist{} },
+		IDContainerRegistryCleanup:       func() Packet { return &ContainerRegistryCleanup{} },
+		IDMovementEffect:                 func() Packet { return &MovementEffect{} },
+		IDSetMovementAuthority:           func() Packet { return &SetMovementAuthority{} },
+		IDCameraAimAssistPresets:         func() Packet { return &CameraAimAssistPresets{} },
 
 		// PhoenixBuilder specific changes.
 		// Author: Liliya233
 		// Netease: new packet
 		IDNeteaseJson: func() Packet { return &NeteaseJson{} },
+	}
+	for id, pk := range serverOriginating {
+		RegisterPacket(id, pk)
+	}
+}
+
+// Packets sent by the client:
+func init() {
+	clientOriginating := map[uint32]func() Packet{
+		IDLogin:                           func() Packet { return &Login{} },
+		IDClientToServerHandshake:         func() Packet { return &ClientToServerHandshake{} },
+		IDResourcePackClientResponse:      func() Packet { return &ResourcePackClientResponse{} },
+		IDText:                            func() Packet { return &Text{} },
+		IDMovePlayer:                      func() Packet { return &MovePlayer{} },
+		IDPassengerJump:                   func() Packet { return &PassengerJump{} },
+		IDTickSync:                        func() Packet { return &TickSync{} },
+		IDActorEvent:                      func() Packet { return &ActorEvent{} },
+		IDInventoryTransaction:            func() Packet { return &InventoryTransaction{} },
+		IDMobEquipment:                    func() Packet { return &MobEquipment{} },
+		IDInteract:                        func() Packet { return &Interact{} },
+		IDBlockPickRequest:                func() Packet { return &BlockPickRequest{} },
+		IDActorPickRequest:                func() Packet { return &ActorPickRequest{} },
+		IDPlayerAction:                    func() Packet { return &PlayerAction{} },
+		IDSetActorLink:                    func() Packet { return &SetActorLink{} },
+		IDAnimate:                         func() Packet { return &Animate{} },
+		IDRespawn:                         func() Packet { return &Respawn{} },
+		IDContainerOpen:                   func() Packet { return &ContainerOpen{} },
+		IDContainerClose:                  func() Packet { return &ContainerClose{} },
+		IDAdventureSettings:               func() Packet { return &AdventureSettings{} },
+		IDPlayerInput:                     func() Packet { return &PlayerInput{} },
+		IDSetPlayerGameType:               func() Packet { return &SetPlayerGameType{} },
+		IDMapInfoRequest:                  func() Packet { return &MapInfoRequest{} },
+		IDRequestChunkRadius:              func() Packet { return &RequestChunkRadius{} },
+		IDBossEvent:                       func() Packet { return &BossEvent{} },
+		IDShowCredits:                     func() Packet { return &ShowCredits{} },
+		IDCommandRequest:                  func() Packet { return &CommandRequest{} },
+		IDCommandBlockUpdate:              func() Packet { return &CommandBlockUpdate{} },
+		IDResourcePackChunkRequest:        func() Packet { return &ResourcePackChunkRequest{} },
+		IDStructureBlockUpdate:            func() Packet { return &StructureBlockUpdate{} },
+		IDPurchaseReceipt:                 func() Packet { return &PurchaseReceipt{} },
+		IDPlayerSkin:                      func() Packet { return &PlayerSkin{} },
+		IDSubClientLogin:                  func() Packet { return &SubClientLogin{} },
+		IDAutomationClientConnect:         func() Packet { return &AutomationClientConnect{} },
+		IDBookEdit:                        func() Packet { return &BookEdit{} },
+		IDNPCRequest:                      func() Packet { return &NPCRequest{} },
+		IDModalFormResponse:               func() Packet { return &ModalFormResponse{} },
+		IDServerSettingsRequest:           func() Packet { return &ServerSettingsRequest{} },
+		IDSetDefaultGameType:              func() Packet { return &SetDefaultGameType{} },
+		IDLabTable:                        func() Packet { return &LabTable{} },
+		IDSetLocalPlayerAsInitialised:     func() Packet { return &SetLocalPlayerAsInitialised{} },
+		IDNetworkStackLatency:             func() Packet { return &NetworkStackLatency{} },
+		IDScriptCustomEvent:               func() Packet { return &ScriptCustomEvent{} },
+		IDLevelSoundEvent:                 func() Packet { return &LevelSoundEvent{} },
+		IDLecternUpdate:                   func() Packet { return &LecternUpdate{} },
+		IDClientCacheStatus:               func() Packet { return &ClientCacheStatus{} },
+		IDMapCreateLockedCopy:             func() Packet { return &MapCreateLockedCopy{} },
+		IDStructureTemplateDataRequest:    func() Packet { return &StructureTemplateDataRequest{} },
+		IDStructureTemplateDataResponse:   func() Packet { return &StructureTemplateDataResponse{} },
+		IDClientCacheBlobStatus:           func() Packet { return &ClientCacheBlobStatus{} },
+		IDEmote:                           func() Packet { return &Emote{} },
+		IDMultiPlayerSettings:             func() Packet { return &MultiPlayerSettings{} },
+		IDSettingsCommand:                 func() Packet { return &SettingsCommand{} },
+		IDAnvilDamage:                     func() Packet { return &AnvilDamage{} },
+		IDPlayerAuthInput:                 func() Packet { return &PlayerAuthInput{} },
+		IDItemStackRequest:                func() Packet { return &ItemStackRequest{} },
+		IDUpdatePlayerGameType:            func() Packet { return &UpdatePlayerGameType{} },
+		IDEmoteList:                       func() Packet { return &EmoteList{} },
+		IDPositionTrackingDBClientRequest: func() Packet { return &PositionTrackingDBClientRequest{} },
+		IDDebugInfo:                       func() Packet { return &DebugInfo{} },
+		IDPacketViolationWarning:          func() Packet { return &PacketViolationWarning{} },
+		IDFilterText:                      func() Packet { return &FilterText{} },
+		IDCreatePhoto:                     func() Packet { return &CreatePhoto{} },
+		IDPhotoInfoRequest:                func() Packet { return &PhotoInfoRequest{} },
+		IDSubChunkRequest:                 func() Packet { return &SubChunkRequest{} },
+		IDScriptMessage:                   func() Packet { return &ScriptMessage{} },
+		IDCodeBuilderSource:               func() Packet { return &CodeBuilderSource{} },
+		IDRequestAbility:                  func() Packet { return &RequestAbility{} },
+		IDRequestPermissions:              func() Packet { return &RequestPermissions{} },
+		IDEditorNetwork:                   func() Packet { return &EditorNetwork{} },
+		IDRequestNetworkSettings:          func() Packet { return &RequestNetworkSettings{} },
+		IDGameTestResults:                 func() Packet { return &GameTestResults{} },
+		IDOpenSign:                        func() Packet { return &OpenSign{} },
+		IDBlockActorData:                  func() Packet { return &BlockActorData{} },
+		IDPlayerToggleCrafterSlotRequest:  func() Packet { return &PlayerToggleCrafterSlotRequest{} },
+		IDSetPlayerInventoryOptions:       func() Packet { return &SetPlayerInventoryOptions{} },
+		IDServerBoundLoadingScreen:        func() Packet { return &ServerBoundLoadingScreen{} },
+		IDServerBoundDiagnostics:          func() Packet { return &ServerBoundDiagnostics{} },
+
+		// PhoenixBuilder specific changes.
+		// Author: Liliya233
+		// Netease: new packet
+		IDNeteaseJson: func() Packet { return &NeteaseJson{} },
+	}
+	for id, pk := range clientOriginating {
+		RegisterPacket(id, pk)
 	}
 }

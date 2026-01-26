@@ -39,6 +39,9 @@ type SetTitle struct {
 	XUID string
 	// PlatformOnlineID is either a uint64 or an empty string.
 	PlatformOnlineID string
+	// FilteredMessage is a filtered version of Message with all the profanity removed. The client will use
+	// this over Message if this field is not empty and they have the "Filter Profanity" setting enabled.
+	FilteredMessage string
 }
 
 // ID ...
@@ -54,4 +57,5 @@ func (pk *SetTitle) Marshal(io protocol.IO) {
 	io.Varint32(&pk.FadeOutDuration)
 	io.String(&pk.XUID)
 	io.String(&pk.PlatformOnlineID)
+	io.String(&pk.FilteredMessage)
 }

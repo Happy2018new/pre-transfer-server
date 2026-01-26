@@ -3,7 +3,7 @@ package minecraft_test
 import (
 	"fmt"
 
-	minecraft "github.com/Happy2018new/pre-transfer-server/minecraft"
+	"github.com/Happy2018new/pre-transfer-server/minecraft"
 	"github.com/Happy2018new/pre-transfer-server/minecraft/protocol/packet"
 )
 

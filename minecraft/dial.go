@@ -13,19 +13,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	mathRand "math/rand"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Happy2018new/pre-transfer-server/minecraft/internal"
 	"github.com/Happy2018new/pre-transfer-server/minecraft/protocol"
 	"github.com/Happy2018new/pre-transfer-server/minecraft/protocol/login"
 	"github.com/Happy2018new/pre-transfer-server/minecraft/protocol/packet"
 	"github.com/OmineDev/flowers-for-machines/core/bunker/auth"
-	"github.com/go-jose/go-jose/v3/jwt"
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/google/uuid"
 )
 
@@ -38,9 +39,9 @@ type Authenticator interface {
 // Dialer allows specifying specific settings for connection to a Minecraft server.
 // The zero value of Dialer is used for the package level Dial function.
 type Dialer struct {
-	// ErrorLog is a log.Logger that errors that occur during packet handling of servers are written to. By
-	// default, ErrorLog is set to one equal to the global logger.
-	ErrorLog *log.Logger
+	// ErrorLog is a log.Logger that errors that occur during packet handling of
+	// servers are written to. By default, errors are not logged.
+	ErrorLog *slog.Logger
 
 	// ClientData is the client data used to login to the server with. It includes fields such as the skin,
 	// locale and UUIDs unique to the client. If empty, a default is sent produced using defaultClientData().
@@ -116,7 +117,7 @@ A zero value of a Dialer struct is used to initiate the connection. A custom Dia
 additional behaviour.
 */
 func Dial(network string) (*Conn, auth.AuthResponse, error) {
-	// func DialTimeout(network string, timeout time.Duration) (*Conn, error) {
+	// func Dial(network, address string) (*Conn, error) {
 	var d Dialer
 	return d.Dial(network)
 }
@@ -129,7 +130,7 @@ func Dial(network string) (*Conn, auth.AuthResponse, error) {
 // If a connection is not established before the timeout ends, DialTimeout returns an error.
 // DialTimeout uses a zero value of Dialer to initiate the connection.
 func DialTimeout(network string, timeout time.Duration) (*Conn, auth.AuthResponse, error) {
-	// func DialTimeout(network string, timeout time.Duration) (*Conn, error) {
+	// DialTimeout(network, address string, timeout time.Duration) (*Conn, error)
 	var d Dialer
 	return d.DialTimeout(network, timeout)
 }
@@ -142,7 +143,7 @@ func DialTimeout(network string, timeout time.Duration) (*Conn, auth.AuthRespons
 // If a connection is not established before the context passed is cancelled, DialContext returns an error.
 // DialContext uses a zero value of Dialer to initiate the connection.
 func DialContext(ctx context.Context, network string) (*Conn, auth.AuthResponse, error) {
-	// func DialContext(ctx context.Context, network string) (*Conn, error) {
+	// func DialContext(ctx context.Context, network, address string) (*Conn, error) {
 	var d Dialer
 	return d.DialContext(ctx, network)
 }
@@ -153,7 +154,7 @@ func DialContext(ctx context.Context, network string) (*Conn, auth.AuthResponse,
 // Dial dials a Minecraft connection to the address passed over the network passed. The network is typically
 // "raknet". A Conn is returned which may be used to receive packets from and send packets to.
 func (d Dialer) Dial(network string) (*Conn, auth.AuthResponse, error) {
-	// func (d Dialer) Dial(network string) (*Conn, error) {
+	// func (d Dialer) Dial(network, address string) (*Conn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
 	return d.DialContext(ctx, network)
@@ -166,7 +167,7 @@ func (d Dialer) Dial(network string) (*Conn, auth.AuthResponse, error) {
 // typically "raknet". A Conn is returned which may be used to receive packets from and send packets to.
 // If a connection is not established before the timeout ends, DialTimeout returns an error.
 func (d Dialer) DialTimeout(network string, timeout time.Duration) (*Conn, auth.AuthResponse, error) {
-	// func (d Dialer) DialTimeout(network string, timeout time.Duration) (*Conn, error) {
+	// func (d Dialer) DialTimeout(network, address string, timeout time.Duration) (*Conn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	return d.DialContext(ctx, network)
@@ -187,8 +188,9 @@ func (d Dialer) DialContext(ctx context.Context, network string) (conn *Conn, au
 		return nil, auth.AuthResponse{}, err
 	}
 	if d.ErrorLog == nil {
-		d.ErrorLog = log.New(os.Stderr, "", log.LstdFlags)
+		d.ErrorLog = slog.New(internal.DiscardHandler{})
 	}
+	d.ErrorLog = d.ErrorLog.With("src", "dialer")
 	if d.Protocol == nil {
 		d.Protocol = DefaultProtocol
 	}
@@ -196,15 +198,16 @@ func (d Dialer) DialContext(ctx context.Context, network string) (conn *Conn, au
 		d.FlushRate = time.Second / 20
 	}
 
-	n, ok := networkByID(network)
+	n, ok := networkByID(network, d.ErrorLog)
 	if !ok {
-		return nil, auth.AuthResponse{}, fmt.Errorf("dial: no network under id %v", network)
+		return nil, auth.AuthResponse{}, &net.OpError{Op: "dial", Net: "minecraft", Err: fmt.Errorf("dial: no network under id %v", network)}
 	}
 
 	/*
 		Delete by Liliya233.
 
 		var pong []byte
+		var netConn net.Conn
 		if pong, err = n.PingContext(ctx, address); err == nil {
 			netConn, err = n.DialContext(ctx, addressWithPongPort(pong, address))
 		} else {
@@ -238,18 +241,19 @@ func (d Dialer) DialContext(ctx context.Context, network string) (conn *Conn, au
 	request = login.Encode(authResponse.ChainInfo, conn.clientData, key)
 	identityData, _, _, err := login.Parse(request)
 	if err != nil {
-		fmt.Printf("WARNING: Identity data parsing error: %v\n", err)
+		fmt.Printf("WARNING: Identity data parsing error: %w\n", err.(error))
 	}
 	// If we got the identity data from Minecraft auth, we need to make sure we set it in the Conn too, as
 	// we are not aware of the identity data ourselves yet.
 	conn.identityData = identityData
 
-	l, c := make(chan struct{}), make(chan struct{})
-	go listenConn(conn, d.ErrorLog, l, c)
+	readyForLogin, connected := make(chan struct{}), make(chan struct{})
+	ctx, cancel := context.WithCancelCause(ctx)
+	go listenConn(conn, readyForLogin, connected, cancel)
 
 	conn.expect(packet.IDNetworkSettings, packet.IDPlayStatus)
 	if err := conn.WritePacket(&packet.RequestNetworkSettings{ClientProtocol: d.Protocol.ID()}); err != nil {
-		return nil, auth.AuthResponse{}, err
+		return nil, auth.AuthResponse{}, conn.wrap(fmt.Errorf("send request network settings: %w", err), "dial")
 	}
 	_ = conn.Flush()
 
@@ -258,83 +262,91 @@ func (d Dialer) DialContext(ctx context.Context, network string) (conn *Conn, au
 		return nil, auth.AuthResponse{}, conn.wrap(context.Cause(ctx), "dial")
 	case <-conn.ctx.Done():
 		return nil, auth.AuthResponse{}, conn.closeErr("dial")
-	case <-ctx.Done():
-		return nil, auth.AuthResponse{}, conn.wrap(ctx.Err(), "dial")
-	case <-l:
+	case <-readyForLogin:
 		// We've received our network settings, so we can now send our login request.
 		conn.expect(packet.IDServerToClientHandshake, packet.IDPlayStatus)
 		if err := conn.WritePacket(&packet.Login{ConnectionRequest: request, ClientProtocol: d.Protocol.ID()}); err != nil {
-			return nil, auth.AuthResponse{}, err
+			return nil, auth.AuthResponse{}, conn.wrap(fmt.Errorf("send login: %w", err), "dial")
 		}
 		_ = conn.Flush()
 
 		select {
+		case <-ctx.Done():
+			return nil, auth.AuthResponse{}, conn.wrap(context.Cause(ctx), "dial")
 		case <-conn.ctx.Done():
 			return nil, auth.AuthResponse{}, conn.closeErr("dial")
-		case <-ctx.Done():
-			return nil, auth.AuthResponse{}, conn.wrap(ctx.Err(), "dial")
-		case <-c:
+		case <-connected:
 			// We've connected successfully. We return the connection and no error.
-			return conn, authResponse, nil
+			return conn, auth.AuthResponse{}, nil
 		}
 	}
 }
 
 // readChainIdentityData reads a login.IdentityData from the Mojang chain
 // obtained through authentication.
-func readChainIdentityData(chainData []byte) login.IdentityData {
+func readChainIdentityData(chainData []byte) (login.IdentityData, error) {
 	chain := struct{ Chain []string }{}
 	if err := json.Unmarshal(chainData, &chain); err != nil {
-		panic("invalid chain data from authentication: " + err.Error())
+		return login.IdentityData{}, fmt.Errorf("read chain: read json: %w", err)
 	}
 	data := chain.Chain[1]
 	claims := struct {
 		ExtraData login.IdentityData `json:"extraData"`
 	}{}
-	tok, err := jwt.ParseSigned(data)
+	tok, err := jwt.ParseSigned(data, []jose.SignatureAlgorithm{jose.ES384})
 	if err != nil {
-		panic("invalid chain data from authentication: " + err.Error())
+		return login.IdentityData{}, fmt.Errorf("read chain: parse jwt: %w", err)
 	}
 	if err := tok.UnsafeClaimsWithoutVerification(&claims); err != nil {
-		panic("invalid chain data from authentication: " + err.Error())
+		return login.IdentityData{}, fmt.Errorf("read chain: read claims: %w", err)
 	}
 	if claims.ExtraData.Identity == "" {
-		panic("chain data contained no data")
+		return login.IdentityData{}, fmt.Errorf("read chain: no extra data found")
 	}
-	return claims.ExtraData
+	return claims.ExtraData, nil
 }
 
 // listenConn listens on the connection until it is closed on another goroutine. The channel passed will
 // receive a value once the connection is logged in.
-func listenConn(conn *Conn, logger *log.Logger, l, c chan struct{}) {
+func listenConn(conn *Conn, readyForLogin, connected chan struct{}, cancel context.CancelCauseFunc) {
 	defer func() {
 		_ = conn.Close()
 	}()
+	cancelContext := true
 	for {
 		// We finally arrived at the packet decoding loop. We constantly decode packets that arrive
 		// and push them to the Conn so that they may be processed.
 		packets, err := conn.dec.Decode()
 		if err != nil {
 			if !errors.Is(err, net.ErrClosed) {
-				logger.Printf("dialer conn: %v\n", err)
+				if cancelContext {
+					cancel(err)
+				} else {
+					conn.log.Error(err.Error())
+				}
 			}
 			return
 		}
 		for _, data := range packets {
 			loggedInBefore, readyToLoginBefore := conn.loggedIn, conn.readyToLogin
 			if err := conn.receive(data); err != nil {
-				logger.Printf("dialer conn: %v", err)
+				if cancelContext {
+					cancel(err)
+				} else {
+					conn.log.Error(err.Error())
+				}
 				return
 			}
 			if !readyToLoginBefore && conn.readyToLogin {
 				// This is the signal that the connection is ready to login, so we put a value in the channel so that
 				// it may be detected.
-				l <- struct{}{}
+				readyForLogin <- struct{}{}
 			}
 			if !loggedInBefore && conn.loggedIn {
 				// This is the signal that the connection was considered logged in, so we put a value in the channel so
 				// that it may be detected.
-				c <- struct{}{}
+				cancelContext = false
+				connected <- struct{}{}
 			}
 		}
 	}
@@ -361,13 +373,13 @@ func defaultClientData(
 	d.DeviceOS = protocol.DeviceAndroid
 	d.GameVersion = protocol.CurrentVersion
 	d.ClientRandomID = mathRand.Int63()
-	d.DeviceID = uuid.NewString()
+	d.DeviceID = uuid.New().String()
 	d.LanguageCode = "zh_CN" // Netease
 	d.AnimatedImageData = make([]login.SkinAnimation, 0)
 	d.PersonaPieces = make([]login.PersonaPiece, 0)
 	d.PieceTintColours = make([]login.PersonaPieceTintColour, 0)
-	d.SelfSignedID = uuid.NewString()
-	d.SkinID = uuid.NewString()
+	d.SelfSignedID = uuid.New().String()
+	d.SkinID = uuid.New().String()
 	d.SkinData = base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0, 0, 0, 255}, 32*64))
 	d.SkinGeometry = base64.StdEncoding.EncodeToString(skinGeometry)
 	d.SkinResourcePatch = base64.StdEncoding.EncodeToString(skinResourcePatch)
@@ -398,7 +410,7 @@ func clearXBLIdentityData(data *login.IdentityData) {
 // unchanged.
 func defaultIdentityData(data *login.IdentityData) {
 	if data.Identity == "" {
-		data.Identity = uuid.NewString()
+		data.Identity = uuid.New().String()
 	}
 	if data.DisplayName == "" {
 		data.DisplayName = "Steve"

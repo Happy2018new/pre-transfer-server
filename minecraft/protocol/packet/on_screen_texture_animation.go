@@ -10,7 +10,6 @@ type OnScreenTextureAnimation struct {
 	// AnimationType is the type of the animation to show. The packet provides no further extra data to allow
 	// modifying the duration or other properties of the animation.
 	AnimationType int32
-	// AnimationType int32
 }
 
 // ID ...

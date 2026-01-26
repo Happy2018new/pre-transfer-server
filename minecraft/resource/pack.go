@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/muhammadmuzzammil1998/jsonc"
 )
 
@@ -117,7 +118,7 @@ func (pack *Pack) Name() string {
 }
 
 // UUID returns the UUID of the resource pack.
-func (pack *Pack) UUID() string {
+func (pack *Pack) UUID() uuid.UUID {
 	return pack.manifest.Header.UUID
 }
 
@@ -433,7 +434,6 @@ func readManifest(path string) (*Manifest, error) {
 	if err := jsonc.Unmarshal(allData, manifest); err != nil {
 		return nil, fmt.Errorf("decode manifest JSON: %w (data: %v)", err, string(allData))
 	}
-	manifest.Header.UUID = strings.ToLower(manifest.Header.UUID)
 
 	if _, err := reader.find("level.dat"); err == nil {
 		manifest.worldTemplate = true

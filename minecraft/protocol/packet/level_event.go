@@ -2,7 +2,6 @@ package packet
 
 import (
 	"github.com/Happy2018new/pre-transfer-server/minecraft/protocol"
-
 	"github.com/go-gl/mathgl/mgl32"
 )
 
@@ -135,6 +134,8 @@ const (
 	LevelEventAnimationVaultDeactivate              = 9812
 	LevelEventAnimationVaultEjectItem               = 9813
 	LevelEventAnimationSpawnCobweb                  = 9814
+	LevelEventParticleSmashAttackGroundDust         = 9815
+	LevelEventParticleCreakingHeartTrail            = 9816
 	LevelEventParticleLegacyEvent                   = 0x4000
 )
 

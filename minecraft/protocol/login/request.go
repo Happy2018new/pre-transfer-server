@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-jose/go-jose/v3"
-	"github.com/go-jose/go-jose/v3/jwt"
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 )
 
 // chain holds a chain with claims, each with their own headers, payloads and signatures. Each claim holds
@@ -34,7 +34,7 @@ func init() {
 		Author: Liliya233, Happy2018new
 	*/
 	// noinspection SpellCheckingInspection
-	// const mojangPublicKey = `MHYwEAYHKoZIzj0CAQYFK4EEACIDYgAE8ELkixyLcwlZryUQcu1TvPOmI2B7vX83ndnWRUaXm74wFfa5f/lwQNTfrLVHa2PmenpGI6JhIMUJaWZrjmMj90NoKNFSNBuKdm8rYiXsfaz3K36x/1U26HpG0ZxK/V1V`
+	// const mojangPublicKey = `MHYwEAYHKoZIzj0CAQYFK4EEACIDYgAECRXueJeTDqNRRgJi/vlRufByu/2G0i2Ebt6YMar5QX/R0DIIyrJMcUpruK4QveTfJSTp3Shlq4Gk34cD/4GUWwkv0DVuzeuB+tXija7HBxii03NHDbPAD0AKnLr2wdAp`
 	const mojangPublicKey = `MHYwEAYHKoZIzj0CAQYFK4EEACIDYgAEEsmU+IF/XeAF3yiqJ7Ko36btx6JtdB26wV9Eyw4AYR/nmesznkfXxwQ4B0NkSnGIZccbb2f3nFUYughKSoAcNHx+lQm8F9h9RwhrNgeN907z06LUA2AqWcwqasxyaU0E`
 
 	data, _ := base64.StdEncoding.DecodeString(mojangPublicKey)
@@ -69,7 +69,7 @@ func Parse(request []byte) (IdentityData, ClientData, AuthResult, error) {
 	if err != nil {
 		return iData, cData, res, fmt.Errorf("parse login request: %w", err)
 	}
-	tok, err := jwt.ParseSigned(req.Chain[0])
+	tok, err := jwt.ParseSigned(req.Chain[0], []jose.SignatureAlgorithm{jose.ES384})
 	if err != nil {
 		return iData, cData, res, fmt.Errorf("parse token 0: %w", err)
 	}
@@ -178,7 +178,7 @@ func parseLoginRequest(requestData []byte) (*request, error) {
 // if the claim holds an identityPublicKey field.
 // The value v passed is decoded into when reading the claims.
 func parseFullClaim(claim string, key *ecdsa.PublicKey, v any) error {
-	tok, err := jwt.ParseSigned(claim)
+	tok, err := jwt.ParseSigned(claim, []jose.SignatureAlgorithm{jose.ES384})
 	if err != nil {
 		return fmt.Errorf("error parsing signed token: %w", err)
 	}
@@ -215,7 +215,7 @@ func Encode(loginChain string, data ClientData, key *ecdsa.PrivateKey) []byte {
 
 	// We parse the header of the first claim it has in the chain, which will soon be the second claim.
 	keyData := MarshalPublicKey(&key.PublicKey)
-	tok, _ := jwt.ParseSigned(request.Chain[0])
+	tok, _ := jwt.ParseSigned(request.Chain[0], []jose.SignatureAlgorithm{jose.ES384})
 
 	//lint:ignore S1005 Double assignment is done explicitly to prevent panics.
 	x5uData, _ := tok.Headers[0].ExtraHeaders["x5u"]
@@ -232,13 +232,13 @@ func Encode(loginChain string, data ClientData, key *ecdsa.PrivateKey) []byte {
 		Claims:               claims,
 		IdentityPublicKey:    x5u,
 		CertificateAuthority: true,
-	}).CompactSerialize()
+	}).Serialize()
 
 	// We add our own claim at the start of the chain.
 	request.Chain = append(chain{firstJWT}, request.Chain...)
 	// We create another token this time, which is signed the same as the claim we just inserted in the chain,
 	// just now it contains client data.
-	request.RawToken, _ = jwt.Signed(signer).Claims(data).CompactSerialize()
+	request.RawToken, _ = jwt.Signed(signer).Claims(data).Serialize()
 
 	return encodeRequest(request)
 }
@@ -275,12 +275,12 @@ func EncodeOffline(identityData IdentityData, data ClientData, key *ecdsa.Privat
 		Claims:            claims,
 		ExtraData:         identityData,
 		IdentityPublicKey: keyData,
-	}).CompactSerialize()
+	}).Serialize()
 
 	request := &request{Chain: chain{firstJWT}}
 	// We create another token this time, which is signed the same as the claim we just inserted in the chain,
 	// just now it contains client data.
-	request.RawToken, _ = jwt.Signed(signer).Claims(data).CompactSerialize()
+	request.RawToken, _ = jwt.Signed(signer).Claims(data).Serialize()
 
 	return encodeRequest(request)
 }

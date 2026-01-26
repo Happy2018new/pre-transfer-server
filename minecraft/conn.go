@@ -10,7 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"math"
 	"net"
 	"strings"
@@ -25,8 +25,8 @@ import (
 	"github.com/Happy2018new/pre-transfer-server/minecraft/protocol/packet"
 	"github.com/Happy2018new/pre-transfer-server/minecraft/resource"
 	"github.com/Happy2018new/pre-transfer-server/minecraft/text"
-	"github.com/go-jose/go-jose/v3"
-	"github.com/go-jose/go-jose/v3/jwt"
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/google/uuid"
 )
 
@@ -57,7 +57,7 @@ type Conn struct {
 	cancelFunc context.CancelCauseFunc
 
 	conn        net.Conn
-	log         *log.Logger
+	log         *slog.Logger
 	authEnabled bool
 
 	proto         Protocol
@@ -149,7 +149,7 @@ type Conn struct {
 // Minecraft packets to that net.Conn.
 // newConn accepts a private key which will be used to identify the connection. If a nil key is passed, the
 // key is generated.
-func newConn(netConn net.Conn, key *ecdsa.PrivateKey, log *log.Logger, proto Protocol, flushRate time.Duration, limits bool) *Conn {
+func newConn(netConn net.Conn, key *ecdsa.PrivateKey, log *slog.Logger, proto Protocol, flushRate time.Duration, limits bool) *Conn {
 	conn := &Conn{
 		enc:          packet.NewEncoder(netConn),
 		dec:          packet.NewDecoder(netConn),
@@ -159,7 +159,7 @@ func newConn(netConn net.Conn, key *ecdsa.PrivateKey, log *log.Logger, proto Pro
 		spawn:        make(chan struct{}),
 		conn:         netConn,
 		privateKey:   key,
-		log:          log,
+		log:          log.With("raddr", netConn.RemoteAddr().String()),
 		hdr:          &packet.Header{},
 		proto:        proto,
 		readerLimits: limits,
@@ -218,6 +218,11 @@ func (conn *Conn) Authenticated() bool {
 // is obtained from the server.
 func (conn *Conn) GameData() GameData {
 	return conn.gameData
+}
+
+// Proto returns the protocol of the connection.
+func (conn *Conn) Proto() Protocol {
+	return conn.proto
 }
 
 // StartGame starts the game for a client that connected to the server. StartGame should be called for a Conn
@@ -359,7 +364,7 @@ func (conn *Conn) ReadPacket() (pk packet.Packet, err error) {
 	if data, ok := conn.takeDeferredPacket(); ok {
 		pk, err := data.decode(conn)
 		if err != nil {
-			conn.log.Println(err)
+			conn.log.Error("read packet: " + err.Error())
 			return conn.ReadPacket()
 		}
 		if len(pk) == 0 {
@@ -379,7 +384,7 @@ func (conn *Conn) ReadPacket() (pk packet.Packet, err error) {
 	case data := <-conn.packets:
 		pk, err := data.decode(conn)
 		if err != nil {
-			conn.log.Println(err)
+			conn.log.Error("read packet: " + err.Error())
 			return conn.ReadPacket()
 		}
 		if len(pk) == 0 {
@@ -788,29 +793,15 @@ func (conn *Conn) handleClientToServerHandshake() error {
 	// Author: Happy2018new
 	/*
 		for _, pack := range conn.resourcePacks {
-			if pack.DownloadURL() != "" {
-				pk.PackURLs = append(pk.PackURLs, protocol.PackURL{
-					UUIDVersion: fmt.Sprintf("%s_%s", pack.UUID(), pack.Version()),
-					URL:         pack.DownloadURL(),
-				})
+			texturePack := protocol.TexturePackInfo{
+				UUID:        pack.UUID(),
+				Version:     pack.Version(),
+				Size:        uint64(pack.Len()),
+				DownloadURL: pack.DownloadURL(),
 			}
-
-			// If it has behaviours, add it to the behaviour pack list. If not, we add it to the texture packs
-			// list.
-			if pack.HasBehaviours() {
-				behaviourPack := protocol.BehaviourPackInfo{UUID: pack.UUID(), Version: pack.Version(), Size: uint64(pack.Len())}
-				if pack.HasScripts() {
-					// One of the resource packs has scripts, so we set HasScripts in the packet to true.
-					pk.HasScripts = true
-					behaviourPack.HasScripts = true
-				}
-				pk.BehaviourPacks = append(pk.BehaviourPacks, behaviourPack)
-				continue
-			}
-			texturePack := protocol.TexturePackInfo{UUID: pack.UUID(), Version: pack.Version(), Size: uint64(pack.Len())}
 			if pack.Encrypted() {
 				texturePack.ContentKey = pack.ContentKey()
-				texturePack.ContentIdentity = pack.Manifest().Header.UUID
+				texturePack.ContentIdentity = pack.Manifest().Header.UUID.String()
 			}
 			pk.TexturePacks = append(pk.TexturePacks, texturePack)
 		}
@@ -832,7 +823,7 @@ type saltClaims struct {
 // on the client side of the connection, using the hash and the public key from the server exposed in the
 // packet.
 func (conn *Conn) handleServerToClientHandshake(pk *packet.ServerToClientHandshake) error {
-	tok, err := jwt.ParseSigned(string(pk.JWT))
+	tok, err := jwt.ParseSigned(string(pk.JWT), []jose.SignatureAlgorithm{jose.ES384})
 	if err != nil {
 		return fmt.Errorf("parse server token: %w", err)
 	}
@@ -882,7 +873,7 @@ func (conn *Conn) handleClientCacheStatus(pk *packet.ClientCacheStatus) error {
 func (conn *Conn) handleResourcePacksInfo(pk *packet.ResourcePacksInfo) error {
 	// First create a new resource pack queue with the information in the packet so we can download them
 	// properly later.
-	totalPacks := len(pk.TexturePacks) + len(pk.BehaviourPacks)
+	totalPacks := len(pk.TexturePacks)
 	conn.packQueue = &resourcePackQueue{
 		packAmount:       totalPacks,
 		downloadingPacks: make(map[string]downloadingPack),
@@ -891,45 +882,23 @@ func (conn *Conn) handleResourcePacksInfo(pk *packet.ResourcePacksInfo) error {
 	packsToDownload := make([]string, 0, totalPacks)
 
 	for index, pack := range pk.TexturePacks {
-		if _, ok := conn.packQueue.downloadingPacks[pack.UUID]; ok {
-			conn.log.Printf("handle ResourcePacksInfo: duplicate texture pack (UUID=%v)\n", pack.UUID)
+		id := pack.UUID.String()
+		if _, ok := conn.packQueue.downloadingPacks[id]; ok {
+			conn.log.Warn("handle ResourcePacksInfo: duplicate texture pack", "UUID", pack.UUID)
 			conn.packQueue.packAmount--
 			continue
 		}
-		if conn.downloadResourcePack != nil && !conn.downloadResourcePack(uuid.MustParse(pack.UUID), pack.Version, index, totalPacks) {
+		if conn.downloadResourcePack != nil && !conn.downloadResourcePack(uuid.MustParse(id), pack.Version, index, totalPacks) {
 			conn.ignoredResourcePacks = append(conn.ignoredResourcePacks, exemptedResourcePack{
-				uuid:    pack.UUID,
+				uuid:    id,
 				version: pack.Version,
 			})
 			conn.packQueue.packAmount--
 			continue
 		}
 		// This UUID_Version is a hack Mojang put in place.
-		packsToDownload = append(packsToDownload, pack.UUID+"_"+pack.Version)
-		conn.packQueue.downloadingPacks[pack.UUID] = downloadingPack{
-			size:       pack.Size,
-			buf:        bytes.NewBuffer(make([]byte, 0, pack.Size)),
-			newFrag:    make(chan []byte),
-			contentKey: pack.ContentKey,
-		}
-	}
-	for index, pack := range pk.BehaviourPacks {
-		if _, ok := conn.packQueue.downloadingPacks[pack.UUID]; ok {
-			conn.log.Printf("handle ResourcePacksInfo: duplicate behaviour pack (UUID=%v)\n", pack.UUID)
-			conn.packQueue.packAmount--
-			continue
-		}
-		if conn.downloadResourcePack != nil && !conn.downloadResourcePack(uuid.MustParse(pack.UUID), pack.Version, index, totalPacks) {
-			conn.ignoredResourcePacks = append(conn.ignoredResourcePacks, exemptedResourcePack{
-				uuid:    pack.UUID,
-				version: pack.Version,
-			})
-			conn.packQueue.packAmount--
-			continue
-		}
-		// This UUID_Version is a hack Mojang put in place.
-		packsToDownload = append(packsToDownload, pack.UUID+"_"+pack.Version)
-		conn.packQueue.downloadingPacks[pack.UUID] = downloadingPack{
+		packsToDownload = append(packsToDownload, id+"_"+pack.Version)
+		conn.packQueue.downloadingPacks[id] = downloadingPack{
 			size:       pack.Size,
 			buf:        bytes.NewBuffer(make([]byte, 0, pack.Size)),
 			newFrag:    make(chan []byte),
@@ -956,24 +925,30 @@ func (conn *Conn) handleResourcePacksInfo(pk *packet.ResourcePacksInfo) error {
 func (conn *Conn) handleResourcePackStack(pk *packet.ResourcePackStack) error {
 	// We currently don't apply resource packs in any way, so instead we just check if all resource packs in
 	// the stacks are also downloaded.
-	for _, pack := range pk.TexturePacks {
-		for i, behaviourPack := range pk.BehaviourPacks {
-			if pack.UUID == behaviourPack.UUID {
-				// We had a behaviour pack with the same UUID as the texture pack, so we drop the texture
-				// pack and log it.
-				conn.log.Printf("handle ResourcePackStack: dropping behaviour pack (UUID=%v) due to a texture pack with the same UUID\n", pack.UUID)
-				pk.BehaviourPacks = append(pk.BehaviourPacks[:i], pk.BehaviourPacks[i+1:]...)
+	/*
+			PhoenixBuilder specific changes.
+			Author: Happy2018new
+			Comment: Needs more test.
+
+		for _, pack := range pk.TexturePacks {
+			for i, behaviourPack := range pk.BehaviourPacks {
+				if pack.UUID == behaviourPack.UUID {
+					// We had a behaviour pack with the same UUID as the texture pack, so we drop the behaviour
+					// pack and log it.
+					conn.log.Warn("handle ResourcePackStack: dropping behaviour pack due to a texture pack with the same UUID", "UUID", pack.UUID)
+					pk.BehaviourPacks = append(pk.BehaviourPacks[:i], pk.BehaviourPacks[i+1:]...)
+				}
+			}
+			if !conn.hasPack(pack.UUID, pack.Version, false) {
+				return fmt.Errorf("texture pack (UUID=%v, version=%v) not downloaded", pack.UUID, pack.Version)
 			}
 		}
-		if !conn.hasPack(pack.UUID, pack.Version, false) {
-			return fmt.Errorf("texture pack (UUID=%v, version=%v) not downloaded", pack.UUID, pack.Version)
+		for _, pack := range pk.BehaviourPacks {
+			if !conn.hasPack(pack.UUID, pack.Version, true) {
+				return fmt.Errorf("behaviour pack (UUID=%v, version=%v) not downloaded", pack.UUID, pack.Version)
+			}
 		}
-	}
-	for _, pack := range pk.BehaviourPacks {
-		if !conn.hasPack(pack.UUID, pack.Version, true) {
-			return fmt.Errorf("behaviour pack (UUID=%v, version=%v) not downloaded", pack.UUID, pack.Version)
-		}
-	}
+	*/
 	conn.expect(packet.IDStartGame)
 	_ = conn.WritePacket(&packet.ResourcePackClientResponse{Response: packet.PackResponseCompleted})
 	return nil
@@ -998,7 +973,7 @@ func (conn *Conn) hasPack(uuid string, version string, hasBehaviours bool) bool 
 		}
 	}
 	for _, pack := range conn.resourcePacks {
-		if pack.UUID() == uuid && pack.Version() == version && pack.HasBehaviours() == hasBehaviours {
+		if pack.UUID().String() == uuid && pack.Version() == version && pack.HasBehaviours() == hasBehaviours {
 			return true
 		}
 	}
@@ -1016,7 +991,7 @@ func (conn *Conn) handleResourcePackClientResponse(pk *packet.ResourcePackClient
 	if conn.packQueue == nil && len(conn.resourcePacks) > 0 {
 		packsToDownload := make([]string, 0)
 		for _, value := range conn.resourcePacks {
-			packIdentity := value.UUID() + "_" + value.Version()
+			packIdentity := value.UUID().String() + "_" + value.Version()
 			if !GetPackDownloadStates(conn.identityData.Identity, packIdentity) {
 				packsToDownload = append(packsToDownload, packIdentity)
 			}
@@ -1048,7 +1023,7 @@ func (conn *Conn) handleResourcePackClientResponse(pk *packet.ResourcePackClient
 	case packet.PackResponseAllPacksDownloaded:
 		pk := &packet.ResourcePackStack{BaseGameVersion: protocol.CurrentVersion, Experiments: []protocol.ExperimentData{{Name: "cameras", Enabled: true}}}
 		for _, pack := range conn.resourcePacks {
-			resourcePack := protocol.StackResourcePack{UUID: pack.UUID(), Version: pack.Version()}
+			resourcePack := protocol.StackResourcePack{UUID: pack.UUID().String(), Version: pack.Version()}
 			// If it has behaviours, add it to the behaviour pack list. If not, we add it to the texture packs
 			// list.
 			if pack.HasBehaviours() {
@@ -1147,12 +1122,19 @@ func (conn *Conn) handleResourcePackDataInfo(pk *packet.ResourcePackDataInfo) er
 	if !ok {
 		// We either already downloaded the pack or we got sent an invalid UUID, that did not match any pack
 		// sent in the ResourcePacksInfo packet.
-		return fmt.Errorf("unknown pack (UUID=%v)", id)
+		return fmt.Errorf("handle ResourcePackDataInfo: unknown pack (UUID=%v)", id)
 	}
 	if pack.size != pk.Size {
-		// Size mismatch: The ResourcePacksInfo packet had a size for the pack that did not match with the
-		// size sent here.
-		conn.log.Printf("pack (UUID=%v) had a different size in ResourcePacksInfo than in ResourcePackDataInfo\n", id)
+		// PhoenixBuilder specific changes.
+		// Author: Liliya233
+		//
+		// Netease: disable error log as they're encrypted
+		{
+			// Size mismatch: The ResourcePacksInfo packet had a size for the pack that did not match with the
+			// size sent here.
+			//
+			// conn.log.Warn("handle ResourcePackDataInfo: pack had a different size in ResourcePacksInfo than in ResourcePackDataInfo", "UUID", id)
+		}
 		pack.size = pk.Size
 	}
 
@@ -1188,13 +1170,13 @@ func (conn *Conn) handleResourcePackDataInfo(pk *packet.ResourcePackDataInfo) er
 		defer conn.packMu.Unlock()
 
 		if pack.buf.Len() != int(pack.size) {
-			conn.log.Printf("incorrect resource pack size (UUID=%v): expected %v, got %v\n", id, pack.size, pack.buf.Len())
+			conn.log.Error(fmt.Sprintf("download resource pack: incorrect resource pack size: expected %v, got %v", pack.size, pack.buf.Len()), "UUID", id)
 			return
 		}
 		// First parse the resource pack from the total byte buffer we obtained.
 		newPack, err := resource.Read(pack.buf)
 		if err != nil {
-			conn.log.Printf("invalid full resource pack data (UUID=%v): %v\n", id, err)
+			conn.log.Error("download resource pack: invalid full resource pack data: "+err.Error(), "UUID", id)
 			return
 		}
 		conn.packQueue.packAmount--
@@ -1236,7 +1218,7 @@ func (conn *Conn) handleResourcePackChunkData(pk *packet.ResourcePackChunkData) 
 // pack to be downloaded.
 func (conn *Conn) handleResourcePackChunkRequest(pk *packet.ResourcePackChunkRequest) error {
 	current := conn.packQueue.currentPack
-	if current.UUID() != pk.UUID {
+	if current.UUID().String() != pk.UUID {
 		return fmt.Errorf("expected pack UUID %v, but got %v", current.UUID(), pk.UUID)
 	}
 	if conn.packQueue.currentOffset != uint64(pk.ChunkIndex)*packChunkSize {
@@ -1270,7 +1252,7 @@ func (conn *Conn) handleResourcePackChunkRequest(pk *packet.ResourcePackChunkReq
 
 			SetPackDownloadStates(
 				conn.identityData.Identity,
-				current.UUID()+"_"+current.Version(),
+				current.UUID().String()+"_"+current.Version(),
 				true,
 			)
 			if !conn.packQueue.AllDownloaded() {
@@ -1468,7 +1450,7 @@ func (conn *Conn) enableEncryption(clientPublicKey *ecdsa.PublicKey) error {
 	})
 	// We produce an encoded JWT using the header and payload above, then we send the JWT in a ServerToClient-
 	// Handshake packet so that the client can initialise encryption.
-	serverJWT, err := jwt.Signed(signer).Claims(saltClaims{Salt: base64.RawStdEncoding.EncodeToString(conn.salt)}).CompactSerialize()
+	serverJWT, err := jwt.Signed(signer).Claims(saltClaims{Salt: base64.RawStdEncoding.EncodeToString(conn.salt)}).Serialize()
 	if err != nil {
 		return fmt.Errorf("compact serialise server JWT: %w", err)
 	}
@@ -1514,6 +1496,6 @@ func (conn *Conn) closeErr(op string) error {
 	case <-conn.ctx.Done():
 		return conn.wrap(context.Cause(conn.ctx), op)
 	default:
-		return conn.wrap(errClosed, op)
+		return conn.wrap(net.ErrClosed, op)
 	}
 }

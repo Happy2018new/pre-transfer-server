@@ -7,10 +7,11 @@ import (
 	"image/color"
 	"io"
 	"math"
+	"math/big"
+	"math/bits"
 	"unsafe"
 
 	"github.com/Happy2018new/pre-transfer-server/minecraft/nbt"
-
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/google/uuid"
 )
@@ -153,7 +154,7 @@ func (r *Reader) SubChunkPos(x *SubChunkPos) {
 // SoundPos reads an mgl32.Vec3 that serves as a position for a sound.
 func (r *Reader) SoundPos(x *mgl32.Vec3) {
 	var b BlockPos
-	r.BlockPos(&b)
+	r.UBlockPos(&b)
 	*x = mgl32.Vec3{float32(b[0]) / 8, float32(b[1]) / 8, float32(b[2]) / 8}
 }
 
@@ -253,6 +254,7 @@ func (r *Reader) PlayerInventoryAction(x *UseItemTransactionData) {
 	}
 	Slice(r, &x.Actions)
 	r.Varuint32(&x.ActionType)
+	r.Varuint32(&x.TriggerType)
 
 	// PhoenixBuilder specific changes.
 	// Author: Happy2018new
@@ -265,6 +267,7 @@ func (r *Reader) PlayerInventoryAction(x *UseItemTransactionData) {
 	r.Vec3(&x.Position)
 	r.Vec3(&x.ClickedPosition)
 	r.Varuint32(&x.BlockRuntimeID)
+	r.Varuint32(&x.ClientPrediction)
 }
 
 // GameRule reads a GameRule x from the Reader.
@@ -609,24 +612,31 @@ func (r *Reader) CompressedBiomeDefinitions(x *map[string]any) {
 	}
 }
 
-// LimitUint32 checks if the value passed is lower than the limit passed. If not, the Reader panics.
-func (r *Reader) LimitUint32(value uint32, max uint32) {
-	if max == math.MaxUint32 {
-		// Account for 0-1 overflowing into max.
-		max = 0
+func (r *Reader) Bitset(x *Bitset, size int) {
+	*x = NewBitset(size)
+	for i := 0; i < size; i += 7 {
+		b, err := r.r.ReadByte()
+		if err != nil {
+			r.panic(err)
+		} else if i+bits.Len8(b) > size {
+			r.panic(errBitsetOverflow)
+		}
+
+		bi := big.NewInt(int64(b & 0x7f))
+		x.int.Or(x.int, bi.Lsh(bi, uint(i)))
+		if b&0x80 == 0 {
+			return
+		}
 	}
-	if value > max {
-		r.panicf("uint32 %v exceeds maximum of %v", value, max)
-	}
+
+	r.panic(errBitsetOverflow)
 }
 
-// LimitInt32 checks if the value passed is lower than the limit passed and higher than the minimum. If not,
-// the Reader panics.
-func (r *Reader) LimitInt32(value int32, min, max int32) {
-	if value < min {
-		r.panicf("int32 %v exceeds minimum of %v", value, min)
-	} else if value > max {
-		r.panicf("int32 %v exceeds maximum of %v", value, max)
+// SliceLimit checks if the value passed is lower than the limit passed. If
+// not, the Reader panics.
+func (r *Reader) SliceLimit(value uint32, max uint32) {
+	if value > max && r.limitsEnabled {
+		r.panicf("slice length was too long: length of %v (max %v)", value, max)
 	}
 }
 
@@ -648,6 +658,7 @@ func (r *Reader) InvalidValue(value any, forField, reason string) {
 // errVarIntOverflow is an error set if one of the Varint methods encounters a varint that does not terminate
 // after 5 or 10 bytes, depending on the data type read into.
 var errVarIntOverflow = errors.New("varint overflows integer")
+var errBitsetOverflow = errors.New("bitset overflows size")
 
 // Varint64 reads up to 10 bytes from the underlying buffer into an int64.
 func (r *Reader) Varint64(x *int64) {

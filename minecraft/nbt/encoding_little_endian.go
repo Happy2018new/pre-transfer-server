@@ -57,9 +57,9 @@ func (littleEndian) WriteFloat64(w *offsetWriter, x float64) error {
 
 // WriteString ...
 func (e littleEndian) WriteString(w *offsetWriter, x string) error {
-	// if len(x) > maxStringSize {
-	// 	return InvalidStringError{Off: w.off, N: uint(len(x)), Err: errStringTooLong}
-	// }
+	if len(x) > maxStringSize {
+		return InvalidStringError{Off: w.off, N: uint(len(x)), Err: errStringTooLong}
+	}
 	if err := e.WriteInt16(w, int16(uint16(len(x)))); err != nil {
 		return FailedWriteError{Op: "WriteString", Off: w.off}
 	}
