@@ -283,9 +283,16 @@ func (r *Reader) GameRule(x *GameRule) {
 		r.Bool(&v)
 		x.Value = v
 	case 2:
-		var v uint32
-		r.Varuint32(&v)
-		x.Value = v
+		// PhoenixBuilder specific changes.
+		// Author: Happy2018new, CoozillaX
+		var v int32
+		r.Varint32(&v)
+		x.Value = uint32(v)
+		/*
+			var v uint32
+			r.Varuint32(&v)
+			x.Value = v
+		*/
 	case 3:
 		var v float32
 		r.Float32(&v)

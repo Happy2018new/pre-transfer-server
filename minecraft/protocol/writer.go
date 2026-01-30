@@ -194,9 +194,17 @@ func (w *Writer) GameRule(x *GameRule) {
 		w.Varuint32(&id)
 		w.Bool(&v)
 	case uint32:
+		// PhoenixBuilder specific changes.
+		// Author: Happy2018new, CoozillaX
 		id := uint32(2)
+		val := int32(v)
 		w.Varuint32(&id)
-		w.Varuint32(&v)
+		w.Varint32(&val)
+		/*
+			id := uint32(2)
+			w.Varuint32(&id)
+			w.Varuint32(&v)
+		*/
 	case float32:
 		id := uint32(3)
 		w.Varuint32(&id)
